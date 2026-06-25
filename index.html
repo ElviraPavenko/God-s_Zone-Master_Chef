@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="uk">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="./style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Alan+Sans:wght@300..900&display=swap" rel="stylesheet">
+    <title>God's Zone Master Chef</title>
+    <style>
+
+    </style>
+</head>
+
+<body>
+    <div class="app">
+        <h1 class="title">God's Zone</h1>
+        <div class="subtitle">Master Chef</div>
+        <div class="panel" id="gamePanel">
+            <div class="top-info">
+                <div class="info-card">
+                    <h3>Раунд</h3>
+                    <p id="roundTitle">Не розпочато</p>
+                </div>
+                <div class="info-card">
+                    <h3>Зараз обирає</h3>
+                    <p id="currentTeamText">—</p>
+                </div>
+                <div class="info-card">
+                    <h3>Прогрес</h3>
+                    <p id="progressText">0 / 0</p>
+                    <div class="progress-wrap">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="boxes" id="boxes"></div>
+            <div class="buttons">
+                <button id="nextRoundBtn" onclick="nextRound()" disabled>Наступний раунд</button>
+                <button onclick="showFinalResults()">Фінальні результати</button>
+                <button onclick="resetGame()">Почати заново</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal active" id="startModal">
+        <div class="modal-content start-modal-content">
+            <div class="modal-title">Налаштування гри</div>
+            <label class="start-label" for="teamCountInput">Кількість команд</label>
+            <input class="start-input" type="number" id="teamCountInput" min="1" value="4" placeholder="4">
+            <button class="gold-btn" onclick="startGame()">Почати гру</button>
+        </div>
+    </div>
+
+    <div class="modal" id="nextTeamModal">
+        <div class="modal-content">
+            <div class="modal-title">Наступний вибір</div>
+            <div class="big-team" id="nextTeamName">Команда 1</div>
+            <button class="gold-btn" onclick="closeNextTeamModal()">Відкрити скриньки</button>
+        </div>
+    </div>
+
+    <div class="modal" id="revealModal">
+        <div class="modal-content">
+            <div class="modal-title">Скриньку відкрито</div>
+            <div class="big-team" id="revealTeam">Команда 1</div>
+            <div style="font-size:clamp(28px,2vw,42px);">отримує:</div>
+            <div class="reveal-products" id="revealProducts"></div>
+            <button class="gold-btn" onclick="continueAfterReveal()">Продовжити</button>
+        </div>
+    </div>
+
+    <div class="modal" id="finalModal">
+        <div class="modal-content final-modal-content">
+            <div class="modal-title">Фінальні результати</div>
+            <div class="results-grid" id="resultsGrid"></div>
+            <div class="buttons">
+                <button class="gold-btn" onclick="copyResults()">Скопіювати результати</button>
+                <button onclick="closeFinalResults()">Закрити</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const rounds = [
+            {
+                title: "Основний продукт",
+                boxes: [
+                    ["Курка"],
+                    ["Сосиски"],
+                    ["Тунець"],
+                    ["Креветки"],
+                    ["Фалафель"]
+                ]
+            },
+            {
+                title: "Овочі",
+                boxes: [
+                    ["капуста", "маринована цибуля", "ананас"],
+                    ["огірок", "морква по-корейськи", "сушена цибуля"],
+                    ["помідор", "солоний огірок", "фісташка"],
+                    ["квашена капуста", "мариновані гриби", "картопля фрі"]
+                ]
+            },
+            {
+                title: "Соуси",
+                boxes: [
+                    ["Кетчуп", "Майонез"],
+                    ["Майонез", "Соєвий соус"],
+                    ["Булдак", "Грецький йогурт"],
+                    ["Ремуладо"],
+                    ["Згущене молоко", "Сметана"]
+                ]
+            },
+        ];
+
+        let teamCount = 4;
+        let teams = [];
+        let currentRoundIndex = 0;
+        let currentBoxes = [];
+        let currentTeamOrder = [];
+        let currentTeamStep = 0;
+        let results = {};
+
+        function playRevealSound() {
+            const A = window.AudioContext || window.webkitAudioContext;
+            const a = new A();
+            const o = a.createOscillator();
+            const g = a.createGain();
+
+            o.type = "triangle";
+            o.frequency.setValueAtTime(180, a.currentTime);
+            o.frequency.exponentialRampToValueAtTime(900, a.currentTime + .3);
+
+            g.gain.setValueAtTime(.001, a.currentTime);
+            g.gain.exponentialRampToValueAtTime(.22, a.currentTime + .03);
+            g.gain.exponentialRampToValueAtTime(.001, a.currentTime + .55);
+
+            o.connect(g);
+            g.connect(a.destination);
+            o.start();
+            o.stop(a.currentTime + .6);
+        }
+
+        function shuffle(array) {
+            const copy = [...array];
+
+            for (let i = copy.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [copy[i], copy[j]] = [copy[j], copy[i]];
+            }
+
+            return copy;
+        }
+
+        function startGame() {
+            const inputValue = parseInt(document.getElementById("teamCountInput").value);
+
+            if (!inputValue || inputValue < 1) {
+                alert("Введіть кількість команд");
+                return;
+            }
+
+            const impossibleRound = rounds.find(round => round.boxes.length < inputValue);
+
+            if (impossibleRound) {
+                alert(`У раунді "${impossibleRound.title}" лише ${impossibleRound.boxes.length} скриньки. Для ${inputValue} команд потрібно мінімум ${inputValue} скриньок.`);
+                return;
+            }
+
+            teamCount = inputValue;
+            teams = [];
+
+            for (let i = 1; i <= teamCount; i++) {
+                teams.push(`Команда ${i}`);
+            }
+
+            results = {};
+
+            teams.forEach(team => {
+                results[team] = {};
+            });
+
+            currentRoundIndex = 0;
+
+            document.getElementById("startModal").classList.remove("active");
+
+            startRound();
+        }
+
+        function startRound() {
+            const round = rounds[currentRoundIndex];
+
+            document.getElementById("roundTitle").textContent =
+                `${currentRoundIndex + 1} / ${rounds.length}: ${round.title}`;
+
+            currentBoxes = shuffle(round.boxes).map(boxItems => ({
+                items: boxItems,
+                opened: false,
+                owner: null
+            }));
+
+            currentTeamOrder = shuffle(teams);
+            currentTeamStep = 0;
+
+            document.getElementById("nextRoundBtn").disabled = true;
+
+            renderBoxes();
+            updateProgress();
+            updateCurrentTeam();
+            showNextTeamModal();
+        }
+
+        function renderBoxes() {
+            const boxesContainer = document.getElementById("boxes");
+            boxesContainer.innerHTML = "";
+
+            currentBoxes.forEach((box, index) => {
+                const boxDiv = document.createElement("div");
+                boxDiv.className = box.opened ? "box opened" : "box";
+
+                boxDiv.innerHTML = `
+                    <div class="mystery-box">
+                        <div class="box-lid"></div>
+                        <div class="box-body">
+                            <div class="question-mark">?</div>
+                        </div>
+                        <div class="box-glow"></div>
+                    </div>
+                `;
+
+                if (!box.opened) {
+                    boxDiv.onclick = function () {
+                        chooseBox(index, boxDiv);
+                    };
+                }
+
+                if (currentTeamStep >= currentTeamOrder.length && !box.opened) {
+                    boxDiv.classList.add("disabled");
+                }
+
+                boxesContainer.appendChild(boxDiv);
+            });
+        }
+
+        function chooseBox(index, boxElement) {
+            if (currentTeamStep >= currentTeamOrder.length) return;
+            if (currentBoxes[index].opened) return;
+
+            const currentTeam = currentTeamOrder[currentTeamStep];
+            const round = rounds[currentRoundIndex];
+
+            boxElement.classList.add("opening");
+            playRevealSound();
+
+            setTimeout(() => {
+                currentBoxes[index].opened = true;
+                currentBoxes[index].owner = currentTeam;
+
+                results[currentTeam][round.title] = currentBoxes[index].items;
+
+                document.getElementById("revealTeam").textContent = currentTeam;
+                document.getElementById("revealProducts").innerHTML =
+                    currentBoxes[index].items.join("<br>");
+
+                currentTeamStep++;
+
+                renderBoxes();
+                updateProgress();
+                updateCurrentTeam();
+
+                document.getElementById("revealModal").classList.add("active");
+            }, 850);
+        }
+
+        function continueAfterReveal() {
+            document.getElementById("revealModal").classList.remove("active");
+
+            if (currentTeamStep < currentTeamOrder.length) {
+                showNextTeamModal();
+            } else {
+                document.getElementById("nextRoundBtn").disabled = false;
+            }
+        }
+
+        function showNextTeamModal() {
+            if (currentTeamStep >= currentTeamOrder.length) return;
+
+            document.getElementById("nextTeamName").textContent =
+                currentTeamOrder[currentTeamStep];
+
+            document.getElementById("nextTeamModal").classList.add("active");
+        }
+
+        function closeNextTeamModal() {
+            document.getElementById("nextTeamModal").classList.remove("active");
+        }
+
+        function updateCurrentTeam() {
+            const currentTeamText = document.getElementById("currentTeamText");
+
+            if (teams.length === 0) {
+                currentTeamText.textContent = "—";
+                return;
+            }
+
+            if (currentTeamStep < currentTeamOrder.length) {
+                currentTeamText.textContent = currentTeamOrder[currentTeamStep];
+            } else {
+                currentTeamText.textContent = "Раунд завершено";
+            }
+        }
+
+        function updateProgress() {
+            const progressText = document.getElementById("progressText");
+            const progressBar = document.getElementById("progressBar");
+
+            if (teams.length === 0) {
+                progressText.textContent = "0 / 0";
+                progressBar.style.width = "0%";
+                return;
+            }
+
+            progressText.textContent = `${currentTeamStep} / ${currentTeamOrder.length}`;
+            progressBar.style.width = (currentTeamStep / currentTeamOrder.length) * 100 + "%";
+        }
+
+        function nextRound() {
+            if (teams.length === 0) {
+                alert("Спочатку почніть гру");
+                return;
+            }
+
+            if (currentTeamStep < currentTeamOrder.length) {
+                alert("Спочатку всі команди мають обрати скриньку");
+                return;
+            }
+
+            if (currentRoundIndex < rounds.length - 1) {
+                currentRoundIndex++;
+                startRound();
+            } else {
+                showFinalResults();
+            }
+        }
+
+        function showFinalResults() {
+            if (teams.length === 0) {
+                alert("Спочатку почніть гру");
+                return;
+            }
+
+            const resultsGrid = document.getElementById("resultsGrid");
+            resultsGrid.innerHTML = "";
+
+            teams.forEach(team => {
+                let html = `<div class="result-card"><h3>${team}</h3>`;
+
+                rounds.forEach(round => {
+                    const items = results[team][round.title];
+
+                    html += `
+                        <p>
+                            <strong>${round.title}:</strong><br>
+                            ${items ? items.join(", ") : "Не обрано"}
+                        </p>
+                    `;
+                });
+
+                html += `</div>`;
+
+                resultsGrid.innerHTML += html;
+            });
+
+            document.getElementById("finalModal").classList.add("active");
+        }
+
+        function closeFinalResults() {
+            document.getElementById("finalModal").classList.remove("active");
+        }
+
+        function copyResults() {
+            let text = "ФІНАЛЬНІ РЕЗУЛЬТАТИ GOD'S ZONE\n\n";
+
+            teams.forEach(team => {
+                text += `${team}\n`;
+
+                rounds.forEach(round => {
+                    const items = results[team][round.title];
+                    text += `${round.title}: ${items ? items.join(", ") : "Не обрано"}\n`;
+                });
+
+                text += `\n`;
+            });
+
+            navigator.clipboard.writeText(text);
+            alert("Результати скопійовано");
+        }
+
+        function resetGame() {
+            teamCount = 4;
+            teams = [];
+            currentRoundIndex = 0;
+            currentBoxes = [];
+            currentTeamOrder = [];
+            currentTeamStep = 0;
+            results = {};
+
+            document.getElementById("teamCountInput").value = 4;
+            document.getElementById("roundTitle").textContent = "Не розпочато";
+            document.getElementById("currentTeamText").textContent = "—";
+            document.getElementById("progressText").textContent = "0 / 0";
+            document.getElementById("progressBar").style.width = "0%";
+            document.getElementById("boxes").innerHTML = "";
+
+            document.getElementById("startModal").classList.add("active");
+            document.getElementById("nextTeamModal").classList.remove("active");
+            document.getElementById("revealModal").classList.remove("active");
+            document.getElementById("finalModal").classList.remove("active");
+        }
+    </script>
+</body>
+
+</html>
